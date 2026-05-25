@@ -1,80 +1,97 @@
 import streamlit as st
+import easyocr
 import cv2
-import pytesseract
 import numpy as np
 import re
 from PIL import Image
 
 # Configuración de página
-st.set_page_config(page_title="OCR Recibos Perú", layout="wide")
-st.title("📄 Análisis Inteligente de Recibos de Servicios Peruanos")
-st.markdown("Aplicación de OCR y NLP para extracción de entidades en contexto peruano.")
+st.set_page_config(page_title="OCR Avanzado - Recibos Perú", layout="wide")
+st.title("📄 Análisis IA de Recibos Peruanos (EasyOCR + NLP)")
+st.markdown("Aplicación con Deep Learning para extracción masiva de entidades.")
 
-# Funciones de NLP
-def limpiar_texto(texto):
-    texto = texto.lower()
-    texto = re.sub(r'[^a-z0-9\s.,/:-]', '', texto)
-    return re.sub(r'\s+', ' ', texto).strip()
+# --- INICIALIZACIÓN DEL MODELO IA ---
+# Usamos cache para que el modelo pesado se cargue solo 1 vez y la app no sea lenta
+@st.cache_resource
+def cargar_lector_ocr():
+    # Carga el modelo en español ('es') usando solo CPU (gpu=False)
+    return easyocr.Reader(['es'], gpu=False)
 
-def extraer_entidades(texto):
-    entidades = {"Total a Pagar": "-", "Año de Facturación": "-", "Posible Fecha": "-"}
+reader = cargar_lector_ocr()
+
+# --- FUNCIONES DE NLP ---
+def extraer_entidades(texto_crudo):
+    # Convertir a minúsculas y quitar saltos de línea para facilitar la búsqueda
+    texto = " ".join(texto_crudo).lower()
     
-    # NLP Regex estricto para Monto: Ahora EXIGE la palabra "pagar" para ignorar el "subtotal"
-    monto = re.search(r'pagar[^\d]*?(\d{2,4}[.,]\d{2}|\d{3,5})', texto)
-    if monto:
-        val = monto.group(1)
-        if not '.' in val and not ',' in val and len(val) >= 3:
-            val = val[:-2] + '.' + val[-2:]
-        val = val.replace(',', '.') # Normalizar comas a puntos
-        entidades["Total a Pagar"] = f"S/ {val}"
+    entidades = {
+        "N° de Suministro": "No detectado",
+        "Mes Facturado": "No detectado",
+        "Total a Pagar": "No detectado",
+        "Fecha de Vencimiento": "No detectada",
+        "Fecha de Emisión": "No detectada",
+        "Consumo Registrado": "No detectado"
+    }
+    
+    # 1. N° de Suministro (Busca la palabra suministro seguida de 6 a 8 dígitos)
+    match_suministro = re.search(r'suministro\D*(\d{6,8})', texto)
+    if match_suministro: entidades["N° de Suministro"] = match_suministro.group(1)
         
-    # NLP Regex para Año
-    ano = re.search(r'(202[4-6])', texto)
-    if ano: 
-        entidades["Año de Facturación"] = ano.group(1)
-        
-    # NLP Regex estricto para Fecha: Obliga a que contenga un mes válido o número del 01 al 12, y año 202X
-    fecha = re.search(r'(\d{2}[/.-](?:ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|0[1-9]|1[0-2])[/.-]202[4-6])', texto)
-    if fecha: 
-        entidades["Posible Fecha"] = fecha.group(1).title()
-        
-    return entidades
+    # 2. Mes Facturado (Busca "facturado" seguido de un mes y año)
+    match_mes = re.search(r'facturado\s+([a-z]+\s+202[4-6])', texto)
+    if match_mes: entidades["Mes Facturado"] = match_mes.group(1).title()
 
+    # 3. Total a Pagar (Busca pagar o total y captura el monto con decimales)
+    match_total = re.search(r'(?:pagar|total)[^\d]*?(\d{1,4}[.,]\d{2})', texto)
+    if match_total: entidades["Total a Pagar"] = f"S/ {match_total.group(1).replace(',', '.')}"
+
+    # 4 y 5. Fechas (Patrón flexible para '11-mar-2025' o '11/03/2025')
+    patron_fecha = r'(\d{2}[/.-](?:ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|\d{2})[/.-]202[4-6])'
+    
+    match_vencimiento = re.search(r'vencimiento\D*' + patron_fecha, texto)
+    if match_vencimiento: entidades["Fecha de Vencimiento"] = match_vencimiento.group(1).title()
+        
+    match_emision = re.search(r'emisi[oó]n\D*' + patron_fecha, texto)
+    if match_emision: entidades["Fecha de Emisión"] = match_emision.group(1).title()
+
+    # 6. Consumo Total en kWh (Captura los montos altos cerca de la palabra consumo o kwh)
+    match_consumo = re.search(r'(?:consumo|diferencia).*?(\d{2,4}[.,]\d{2})\s*(?:kwh|kw|x)', texto)
+    if match_consumo: entidades["Consumo Registrado"] = match_consumo.group(1).replace(',', '.') + " kWh"
+
+    return texto, entidades
+
+# --- INTERFAZ WEB ---
 uploaded_file = st.file_uploader("Sube la imagen del recibo (JPG/PNG)", type=['jpg', 'png', 'jpeg'])
 
 if uploaded_file is not None:
     image = Image.open(uploaded_file)
     st.image(image, caption='Imagen Original', width=400)
     
-    with st.spinner('Procesando imagen con OCR y NLP...'):
+    with st.spinner('Procesando imagen con IA (EasyOCR)... Esto puede tomar unos 10-15 segundos.'):
+        # Convertir imagen para OpenCV
         img_array = np.array(image)
+        # Ya no binarizamos en extremo, EasyOCR es inteligente. Solo lo pasamos a escala de grises.
         gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
         
-        # Preprocesamiento equilibrado
-        ancho_base = 1000
-        proporcion = ancho_base / gray.shape[1]
-        dim = (ancho_base, int(gray.shape[0] * proporcion))
-        resized = cv2.resize(gray, dim, interpolation=cv2.INTER_AREA)
+        # Extraer texto usando EasyOCR (devuelve una lista de frases)
+        # detail=0 nos da solo el texto puro, sin coordenadas, paragraph=True junta textos cercanos
+        resultados_ocr = reader.readtext(gray, detail=0, paragraph=True)
         
-        # Binarización adaptativa con un bloque más grande (21) para manejar mejor las sombras de la foto
-        thresh = cv2.adaptiveThreshold(resized, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 4)
+        # Aplicar NLP
+        texto_limpio, entidades = extraer_entidades(resultados_ocr)
         
-        # OCR (SOLUCIÓN CLAVE: psm 11 busca texto disperso en todo el recibo)
-        custom_config = r'-l spa --oem 3 --psm 11'
-        texto_crudo = pytesseract.image_to_string(thresh, config=custom_config)
+        # Mostrar resultados visuales
+        st.success("¡Lectura y análisis completados!")
         
-        # NLP
-        texto_limpio = limpiar_texto(texto_crudo)
-        entidades = extraer_entidades(texto_limpio)
-        
-        col1, col2 = st.columns(2)
+        col1, col2 = st.columns([1, 1])
         
         with col1:
-            st.subheader("📝 Texto Extraído (Limpio)")
-            st.write(texto_limpio)
-            
-        with col2:
             st.subheader("🔍 Entidades Extraídas (NLP)")
-            st.metric(label="Total a Pagar", value=entidades["Total a Pagar"])
-            st.metric(label="Año de Facturación", value=entidades["Año de Facturación"])
-            st.metric(label="Fecha Detectada", value=entidades["Posible Fecha"])
+            # Mostramos la metadata interesante usando un diseño más limpio
+            for clave, valor in entidades.items():
+                st.write(f"**{clave}:** {valor}")
+                
+        with col2:
+            st.subheader("📝 Texto en Bruto (EasyOCR)")
+            with st.expander("Ver lectura completa de la IA"):
+                st.write(texto_limpio)
