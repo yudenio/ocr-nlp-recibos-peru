@@ -3,9 +3,3 @@ opencv-python-headless
 pytesseract
 numpy
 Pillow
-
-# 2. packages.txt (Programas del sistema operativo Linux)
-# Esto le dice a la nube de Streamlit que instale el motor OCR y el idioma español
-%%writefile packages.txt
-tesseract-ocr
-tesseract-ocr-spa
