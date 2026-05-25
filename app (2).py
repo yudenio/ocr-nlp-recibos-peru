@@ -13,28 +13,26 @@ st.markdown("Aplicación de OCR y NLP para extracción de entidades en contexto 
 # Funciones de NLP
 def limpiar_texto(texto):
     texto = texto.lower()
-    # Permitimos letras, números y guiones/puntos para las fechas y montos
     texto = re.sub(r'[^a-z0-9\s.,/:-]', '', texto)
     return re.sub(r'\s+', ' ', texto).strip()
 
 def extraer_entidades(texto):
     entidades = {"Total a Pagar": "-", "Año de Facturación": "-", "Posible Fecha": "-"}
     
-    # NLP Regex para Monto: Busca "pagar" o "total", ignora basura intermedia y busca el número
+    # NLP Regex para Monto
     monto = re.search(r'(pagar|total).*?(\d{2,4}[.,]\d{2}|\d{3,5})', texto)
     if monto:
         val = monto.group(2)
-        # Si el OCR omitió el punto decimal (ej. 8630 en vez de 86.30), lo reconstruimos
         if not '.' in val and not ',' in val and len(val) >= 3:
             val = val[:-2] + '.' + val[-2:]
         entidades["Total a Pagar"] = f"S/ {val}"
         
-    # NLP Regex para Año
-    ano = re.search(r'(202[4-5])', texto)
+    # NLP Regex para Año (Actualizado a 2026)
+    ano = re.search(r'(202[4-6])', texto)
     if ano: 
         entidades["Año de Facturación"] = ano.group(1)
         
-    # NLP Regex para Fecha: Ahora soporta formatos como "11-mar-2025" o "11/03/2025"
+    # NLP Regex para Fecha
     fecha = re.search(r'(\d{2}[/.-](?:\d{2}|[a-z]{3})[/.-]\d{2,4})', texto)
     if fecha: 
         entidades["Posible Fecha"] = fecha.group(1).title()
@@ -50,11 +48,21 @@ if uploaded_file is not None:
     with st.spinner('Procesando imagen con OCR y NLP...'):
         img_array = np.array(image)
         gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-        thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
         
+        # SOLUCIÓN: Redimensionar y aplicar umbral de Otsu para estabilizar la lectura
+        ancho_base = 1200
+        proporcion = ancho_base / gray.shape[1]
+        dim = (ancho_base, int(gray.shape[0] * proporcion))
+        resized = cv2.resize(gray, dim, interpolation=cv2.INTER_AREA)
+        
+        blur = cv2.GaussianBlur(resized, (5,5), 0)
+        _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # OCR
         custom_config = r'-l spa --oem 3 --psm 6'
         texto_crudo = pytesseract.image_to_string(thresh, config=custom_config)
         
+        # NLP
         texto_limpio = limpiar_texto(texto_crudo)
         entidades = extraer_entidades(texto_limpio)
         
@@ -62,7 +70,6 @@ if uploaded_file is not None:
         
         with col1:
             st.subheader("📝 Texto Extraído (Limpio)")
-            # SOLUCIÓN RED: Usamos st.write en lugar de st.text_area para evitar fallos de Localtunnel
             st.write(texto_limpio)
             
         with col2:
