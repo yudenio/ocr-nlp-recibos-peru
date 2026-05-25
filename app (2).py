@@ -35,6 +35,7 @@ if uploaded_file is not None:
                 
                 model = genai.GenerativeModel(modelo_elegido)
                 
+                # Prompt mejorado con los nuevos requerimientos de extracción de datos
                 prompt = """
                 Analiza esta imagen de un documento peruano.
                 Devuelve ÚNICAMENTE un objeto JSON con estas claves exactas (pon "-" si no encuentras el dato):
@@ -42,18 +43,20 @@ if uploaded_file is not None:
                   "tipo_documento": "Clasifica el documento (ej. Recibo de Luz, Factura de Agua, DNI, Ticket)",
                   "alerta_pago": "Análisis de estado: indica si está 'Vencido' o 'Vigente'",
                   "suministro": "Número de Suministro o Cliente",
+                  "titular": "Nombre completo del cliente o titular del número de suministro",
                   "mes_facturado": "El mes y año facturado (ej. Enero 2026)",
-                  "total_pagar": "Monto total a pagar (ej. S/ 86.30)",
+                  "total_mes": "Monto correspondiente al 'TOTAL DEL MES' incluyendo la moneda (ej. S/ 87.33)",
+                  "total_pagar": "Monto correspondiente al 'TOTAL A PAGAR S/' incluyendo la moneda (ej. S/ 87.40)",
                   "fecha_vencimiento": "Fecha de vencimiento",
                   "fecha_emision": "Fecha de emisión del recibo",
-                  "consumo": "Consumo registrado en kWh"
+                  "consumo": "Consumo registrado en kWh (ej. 118.00 kWh)"
                 }
                 """
                 
                 response = model.generate_content([prompt, image])
                 texto_respuesta = response.text.strip()
                 
-                # Limpieza
+                # Limpieza de la respuesta
                 if texto_respuesta.startswith("```json"):
                     texto_respuesta = texto_respuesta[7:-3]
                 elif texto_respuesta.startswith("```"):
@@ -66,22 +69,28 @@ if uploaded_file is not None:
                 # Mostrar métricas visuales
                 st.subheader("🔍 Entidades Extraídas (IA Multimodal)")
                 
-                st.write(f"**Tipo de Documento detectado:** {entidades.get('tipo_documento', '-')}")
-                st.write(f"**Estado de Pago:** {entidades.get('alerta_pago', '-')}")
+                # Datos de cabecera en texto destacado
+                st.write(f"**Tipo de Documento:** {entidades.get('tipo_documento', '-')}")
+                st.write(f"**Titular del Suministro:** {entidades.get('titular', '-')}")
+                st.write(f"**Estado del Recibo:** {entidades.get('alerta_pago', '-')}")
                 st.markdown("---")
                 
+                # Bloque 1 de métricas (Montos e Identificación)
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Total a Pagar", entidades.get("total_pagar", "-"))
-                col2.metric("N° de Suministro", entidades.get("suministro", "-"))
-                col3.metric("Consumo", entidades.get("consumo", "-"))
+                col2.metric("Total del Mes", entidades.get("total_mes", "-"))
+                col3.metric("N° de Suministro", entidades.get("suministro", "-"))
                 
+                # Bloque 2 de métricas (Fechas y Consumo)
                 col4, col5, col6 = st.columns(3)
-                col4.metric("Vencimiento", entidades.get("fecha_vencimiento", "-"))
-                col5.metric("Emisión", entidades.get("fecha_emision", "-"))
-                col6.metric("Mes Facturado", entidades.get("mes_facturado", "-"))
+                col4.metric("Consumo", entidades.get("consumo", "-"))
+                col5.metric("Fecha de Vencimiento", entidades.get("fecha_vencimiento", "-"))
+                col6.metric("Fecha de Emisión", entidades.get("fecha_emision", "-"))
+                
+                st.write(f"**Periodo / Mes Facturado:** {entidades.get('mes_facturado', '-')}")
                 
                 st.markdown("---")
-                # Botón de Descarga
+                # Botón de Descarga actualizado con la nueva estructura
                 json_string = json.dumps(entidades, indent=4, ensure_ascii=False)
                 st.download_button(
                     label="📥 Descargar Resultados (JSON)",
