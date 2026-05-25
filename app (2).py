@@ -27,25 +27,12 @@ if uploaded_file is not None:
             try:
                 genai.configure(api_key=api_key)
                 
-                # 1. RUTINA EXPERTA: Auto-descubrimiento de modelos disponibles
-                # Le preguntamos a la API a qué modelos de generación tiene acceso tu llave
+                # Auto-descubrimiento de modelos
                 modelos_disponibles = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                modelo_elegido = next((m for m in modelos_disponibles if '1.5-flash' in m or 'pro-vision' in m), modelos_disponibles[0] if modelos_disponibles else None)
                 
-                modelo_elegido = None
-                
-                # Buscamos la versión más moderna (1.5 flash) o la clásica de visión
-                for nombre in modelos_disponibles:
-                    if '1.5-flash' in nombre or 'pro-vision' in nombre:
-                        modelo_elegido = nombre
-                        break
-                
-                # Si no encuentra los preferidos, usa el primer modelo disponible como contingencia
-                if not modelo_elegido and modelos_disponibles:
-                    modelo_elegido = modelos_disponibles[0]
-
                 st.info(f"💡 Modelo detectado y conectado automáticamente: {modelo_elegido}")
                 
-                # 2. Inicializar el modelo exacto que tu API Key soporta
                 model = genai.GenerativeModel(modelo_elegido)
                 
                 prompt = """
@@ -53,7 +40,7 @@ if uploaded_file is not None:
                 Devuelve ÚNICAMENTE un objeto JSON con estas claves exactas (pon "-" si no encuentras el dato):
                 {
                   "tipo_documento": "Clasifica el documento (ej. Recibo de Luz, Factura de Agua, DNI, Ticket)",
-                  "alerta_pago": "Análisis de estado: indica si está 'Vencido' o 'Vigente' comparando la fecha de vencimiento con el día de hoy",
+                  "alerta_pago": "Análisis de estado: indica si está 'Vencido' o 'Vigente'",
                   "suministro": "Número de Suministro o Cliente",
                   "mes_facturado": "El mes y año facturado (ej. Enero 2026)",
                   "total_pagar": "Monto total a pagar (ej. S/ 86.30)",
@@ -66,7 +53,7 @@ if uploaded_file is not None:
                 response = model.generate_content([prompt, image])
                 texto_respuesta = response.text.strip()
                 
-                # Limpieza por si la IA añade formato markdown
+                # Limpieza
                 if texto_respuesta.startswith("```json"):
                     texto_respuesta = texto_respuesta[7:-3]
                 elif texto_respuesta.startswith("```"):
@@ -78,6 +65,11 @@ if uploaded_file is not None:
                 
                 # Mostrar métricas visuales
                 st.subheader("🔍 Entidades Extraídas (IA Multimodal)")
+                
+                st.write(f"**Tipo de Documento detectado:** {entidades.get('tipo_documento', '-')}")
+                st.write(f"**Estado de Pago:** {entidades.get('alerta_pago', '-')}")
+                st.markdown("---")
+                
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Total a Pagar", entidades.get("total_pagar", "-"))
                 col2.metric("N° de Suministro", entidades.get("suministro", "-"))
@@ -88,12 +80,8 @@ if uploaded_file is not None:
                 col5.metric("Emisión", entidades.get("fecha_emision", "-"))
                 col6.metric("Mes Facturado", entidades.get("mes_facturado", "-"))
                 
-            except Exception as e:
-                st.error(f"Error de procesamiento: {e}")
-                if 'modelos_disponibles' in locals():
-                    st.write("Modelos a los que tu llave tiene acceso actualmente:", modelos_disponibles)
-st.markdown("---")
-                # Cumplir con la rúbrica: Botón de Descarga
+                st.markdown("---")
+                # Botón de Descarga
                 json_string = json.dumps(entidades, indent=4, ensure_ascii=False)
                 st.download_button(
                     label="📥 Descargar Resultados (JSON)",
@@ -101,3 +89,6 @@ st.markdown("---")
                     mime="application/json",
                     data=json_string,
                 )
+                
+            except Exception as e:
+                st.error(f"Error de procesamiento: {e}")
