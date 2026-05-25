@@ -1,64 +1,17 @@
 import streamlit as st
-import easyocr
-import cv2
-import numpy as np
-import re
+import google.generativeai as genai
 from PIL import Image
+import json
 
 # Configuración de página
-st.set_page_config(page_title="OCR Avanzado - Recibos Perú", layout="wide")
-st.title("📄 Análisis IA de Recibos Peruanos (EasyOCR + NLP)")
-st.markdown("Aplicación con Deep Learning para extracción masiva de entidades.")
+st.set_page_config(page_title="IA Multimodal - Recibos Perú", layout="wide")
+st.title("📄 Análisis Inteligente de Recibos con Gemini Pro Vision")
+st.markdown("Extracción de entidades mediante Modelos Multimodales en la nube.")
 
-# --- INICIALIZACIÓN DEL MODELO IA ---
-# Usamos cache para que el modelo pesado se cargue solo 1 vez y la app no sea lenta
-@st.cache_resource
-def cargar_lector_ocr():
-    # Carga el modelo en español ('es') usando solo CPU (gpu=False)
-    return easyocr.Reader(['es'], gpu=False)
-
-reader = cargar_lector_ocr()
-
-# --- FUNCIONES DE NLP ---
-def extraer_entidades(texto_crudo):
-    # Convertir a minúsculas y quitar saltos de línea para facilitar la búsqueda
-    texto = " ".join(texto_crudo).lower()
-    
-    entidades = {
-        "N° de Suministro": "No detectado",
-        "Mes Facturado": "No detectado",
-        "Total a Pagar": "No detectado",
-        "Fecha de Vencimiento": "No detectada",
-        "Fecha de Emisión": "No detectada",
-        "Consumo Registrado": "No detectado"
-    }
-    
-    # 1. N° de Suministro (Busca la palabra suministro seguida de 6 a 8 dígitos)
-    match_suministro = re.search(r'suministro\D*(\d{6,8})', texto)
-    if match_suministro: entidades["N° de Suministro"] = match_suministro.group(1)
-        
-    # 2. Mes Facturado (Busca "facturado" seguido de un mes y año)
-    match_mes = re.search(r'facturado\s+([a-z]+\s+202[4-6])', texto)
-    if match_mes: entidades["Mes Facturado"] = match_mes.group(1).title()
-
-    # 3. Total a Pagar (Busca pagar o total y captura el monto con decimales)
-    match_total = re.search(r'(?:pagar|total)[^\d]*?(\d{1,4}[.,]\d{2})', texto)
-    if match_total: entidades["Total a Pagar"] = f"S/ {match_total.group(1).replace(',', '.')}"
-
-    # 4 y 5. Fechas (Patrón flexible para '11-mar-2025' o '11/03/2025')
-    patron_fecha = r'(\d{2}[/.-](?:ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|\d{2})[/.-]202[4-6])'
-    
-    match_vencimiento = re.search(r'vencimiento\D*' + patron_fecha, texto)
-    if match_vencimiento: entidades["Fecha de Vencimiento"] = match_vencimiento.group(1).title()
-        
-    match_emision = re.search(r'emisi[oó]n\D*' + patron_fecha, texto)
-    if match_emision: entidades["Fecha de Emisión"] = match_emision.group(1).title()
-
-    # 6. Consumo Total en kWh (Captura los montos altos cerca de la palabra consumo o kwh)
-    match_consumo = re.search(r'(?:consumo|diferencia).*?(\d{2,4}[.,]\d{2})\s*(?:kwh|kw|x)', texto)
-    if match_consumo: entidades["Consumo Registrado"] = match_consumo.group(1).replace(',', '.') + " kWh"
-
-    return texto, entidades
+# --- BARRA LATERAL PARA LA API KEY ---
+st.sidebar.header("🔑 Configuración")
+api_key = st.sidebar.text_input("Pega tu API Key de Google Gemini aquí:", type="password")
+st.sidebar.markdown("[Obtén tu API Key gratis aquí](https://aistudio.google.com/app/apikey)")
 
 # --- INTERFAZ WEB ---
 uploaded_file = st.file_uploader("Sube la imagen del recibo (JPG/PNG)", type=['jpg', 'png', 'jpeg'])
@@ -67,31 +20,60 @@ if uploaded_file is not None:
     image = Image.open(uploaded_file)
     st.image(image, caption='Imagen Original', width=400)
     
-    with st.spinner('Procesando imagen con IA (EasyOCR)... Esto puede tomar unos 10-15 segundos.'):
-        # Convertir imagen para OpenCV
-        img_array = np.array(image)
-        # Ya no binarizamos en extremo, EasyOCR es inteligente. Solo lo pasamos a escala de grises.
-        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-        
-        # Extraer texto usando EasyOCR (devuelve una lista de frases)
-        # detail=0 nos da solo el texto puro, sin coordenadas, paragraph=True junta textos cercanos
-        resultados_ocr = reader.readtext(gray, detail=0, paragraph=True)
-        
-        # Aplicar NLP
-        texto_limpio, entidades = extraer_entidades(resultados_ocr)
-        
-        # Mostrar resultados visuales
-        st.success("¡Lectura y análisis completados!")
-        
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            st.subheader("🔍 Entidades Extraídas (NLP)")
-            # Mostramos la metadata interesante usando un diseño más limpio
-            for clave, valor in entidades.items():
-                st.write(f"**{clave}:** {valor}")
+    if not api_key:
+        st.warning("⚠️ Por favor, ingresa tu API Key en la barra lateral para continuar.")
+    else:
+        with st.spinner('Analizando recibo con Gemini Pro... (Esto tomará unos 5 segundos)'):
+            try:
+                # Configurar la API de Gemini
+                genai.configure(api_key=api_key)
                 
-        with col2:
-            st.subheader("📝 Texto en Bruto (EasyOCR)")
-            with st.expander("Ver lectura completa de la IA"):
-                st.write(texto_limpio)
+                # Usar el modelo optimizado para visión
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                
+                # El Prompt maestro que combina OCR y NLP estructurado
+                prompt = """
+                Actúa como un experto en extracción de datos de documentos peruanos.
+                Analiza esta imagen de un recibo de servicios (como Luz del Sur) y extrae exactamente la siguiente información.
+                
+                Devuelve ÚNICAMENTE un objeto JSON válido con estas claves exactas (si no encuentras un dato, pon "-"):
+                {
+                  "suministro": "Número de Suministro o Cliente",
+                  "mes_facturado": "El mes y año facturado (ej. Enero 2026)",
+                  "total_pagar": "Monto total a pagar incluyendo la moneda (ej. S/ 86.30)",
+                  "fecha_vencimiento": "Fecha de vencimiento",
+                  "fecha_emision": "Fecha de emisión del recibo",
+                  "consumo": "Consumo registrado en el mes (ej. 101.40 kWh)"
+                }
+                No incluyas formato markdown como ```json, solo el texto del JSON puro.
+                """
+                
+                # Llamada a la IA
+                response = model.generate_content([prompt, image])
+                texto_respuesta = response.text.strip()
+                
+                # Limpieza por si Gemini añade formato markdown por costumbre
+                if texto_respuesta.startswith("```json"):
+                    texto_respuesta = texto_respuesta[7:-3]
+                elif texto_respuesta.startswith("```"):
+                    texto_respuesta = texto_respuesta[3:-3]
+                    
+                # Parsear el resultado
+                entidades = json.loads(texto_respuesta)
+                
+                st.success("¡Análisis completado con éxito! Cero impacto en el servidor.")
+                
+                # Mostrar métricas visuales
+                st.subheader("🔍 Entidades Extraídas (IA Multimodal)")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total a Pagar", entidades.get("total_pagar", "-"))
+                col2.metric("N° de Suministro", entidades.get("suministro", "-"))
+                col3.metric("Consumo", entidades.get("consumo", "-"))
+                
+                col4, col5, col6 = st.columns(3)
+                col4.metric("Vencimiento", entidades.get("fecha_vencimiento", "-"))
+                col5.metric("Emisión", entidades.get("fecha_emision", "-"))
+                col6.metric("Mes Facturado", entidades.get("mes_facturado", "-"))
+                
+            except Exception as e:
+                st.error(f"Ocurrió un error en la conexión o procesamiento: {e}")
