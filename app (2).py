@@ -49,9 +49,11 @@ if uploaded_file is not None:
                 model = genai.GenerativeModel(modelo_elegido)
                 
                 prompt = """
-                Analiza esta imagen de un recibo de servicios peruano (como Luz del Sur).
+                Analiza esta imagen de un documento peruano.
                 Devuelve ÚNICAMENTE un objeto JSON con estas claves exactas (pon "-" si no encuentras el dato):
                 {
+                  "tipo_documento": "Clasifica el documento (ej. Recibo de Luz, Factura de Agua, DNI, Ticket)",
+                  "alerta_pago": "Análisis de estado: indica si está 'Vencido' o 'Vigente' comparando la fecha de vencimiento con el día de hoy",
                   "suministro": "Número de Suministro o Cliente",
                   "mes_facturado": "El mes y año facturado (ej. Enero 2026)",
                   "total_pagar": "Monto total a pagar (ej. S/ 86.30)",
@@ -90,3 +92,12 @@ if uploaded_file is not None:
                 st.error(f"Error de procesamiento: {e}")
                 if 'modelos_disponibles' in locals():
                     st.write("Modelos a los que tu llave tiene acceso actualmente:", modelos_disponibles)
+st.markdown("---")
+                # Cumplir con la rúbrica: Botón de Descarga
+                json_string = json.dumps(entidades, indent=4, ensure_ascii=False)
+                st.download_button(
+                    label="📥 Descargar Resultados (JSON)",
+                    file_name="datos_extraidos.json",
+                    mime="application/json",
+                    data=json_string,
+                )
