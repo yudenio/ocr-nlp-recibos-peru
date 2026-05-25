@@ -19,21 +19,22 @@ def limpiar_texto(texto):
 def extraer_entidades(texto):
     entidades = {"Total a Pagar": "-", "Año de Facturación": "-", "Posible Fecha": "-"}
     
-    # NLP Regex para Monto
-    monto = re.search(r'(pagar|total).*?(\d{2,4}[.,]\d{2}|\d{3,5})', texto)
+    # NLP Regex estricto para Monto: Ahora EXIGE la palabra "pagar" para ignorar el "subtotal"
+    monto = re.search(r'pagar[^\d]*?(\d{2,4}[.,]\d{2}|\d{3,5})', texto)
     if monto:
-        val = monto.group(2)
+        val = monto.group(1)
         if not '.' in val and not ',' in val and len(val) >= 3:
             val = val[:-2] + '.' + val[-2:]
+        val = val.replace(',', '.') # Normalizar comas a puntos
         entidades["Total a Pagar"] = f"S/ {val}"
         
-    # NLP Regex para Año (Actualizado a 2026)
+    # NLP Regex para Año
     ano = re.search(r'(202[4-6])', texto)
     if ano: 
         entidades["Año de Facturación"] = ano.group(1)
         
-    # NLP Regex para Fecha
-    fecha = re.search(r'(\d{2}[/.-](?:\d{2}|[a-z]{3})[/.-]\d{2,4})', texto)
+    # NLP Regex estricto para Fecha: Obliga a que contenga un mes válido o número del 01 al 12, y año 202X
+    fecha = re.search(r'(\d{2}[/.-](?:ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|0[1-9]|1[0-2])[/.-]202[4-6])', texto)
     if fecha: 
         entidades["Posible Fecha"] = fecha.group(1).title()
         
@@ -49,17 +50,17 @@ if uploaded_file is not None:
         img_array = np.array(image)
         gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
         
-        # SOLUCIÓN: Redimensionar y aplicar umbral de Otsu para estabilizar la lectura
-        ancho_base = 1200
+        # Preprocesamiento equilibrado
+        ancho_base = 1000
         proporcion = ancho_base / gray.shape[1]
         dim = (ancho_base, int(gray.shape[0] * proporcion))
         resized = cv2.resize(gray, dim, interpolation=cv2.INTER_AREA)
         
-        blur = cv2.GaussianBlur(resized, (5,5), 0)
-        _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        # Binarización adaptativa con un bloque más grande (21) para manejar mejor las sombras de la foto
+        thresh = cv2.adaptiveThreshold(resized, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 4)
         
-        # OCR
-        custom_config = r'-l spa --oem 3 --psm 6'
+        # OCR (SOLUCIÓN CLAVE: psm 11 busca texto disperso en todo el recibo)
+        custom_config = r'-l spa --oem 3 --psm 11'
         texto_crudo = pytesseract.image_to_string(thresh, config=custom_config)
         
         # NLP
